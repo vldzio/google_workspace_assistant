@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Workspace Assistant</title>
+<meta name="description" content="A Google ADK agent that uses MCP tools for calendar, mail and Drive, demonstrated on simulated sample data.">
+<link rel="stylesheet" href="base.css">
+<style>
+  .sim{border-left:4px solid var(--accent);padding:10px 14px;background:var(--code);border-radius:0 10px 10px 0;margin:0 0 16px;font-size:14px}
+  .chat{display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:62vh;overflow:auto;padding:4px}
+  .msg{max-width:92%;padding:10px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);white-space:pre-wrap;overflow-wrap:anywhere}
+  .msg.you{align-self:flex-end;background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+  .steps{margin-top:8px;font-size:13px}.steps summary{cursor:pointer;color:var(--muted)}
+  .step{padding:6px 8px;border-left:3px solid var(--border);margin:6px 0;background:var(--code);border-radius:0 6px 6px 0;overflow-wrap:anywhere}
+  .step b{color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chips button{background:transparent;color:var(--accent);font-weight:500;font-size:14px}
+  .composer{display:flex;gap:8px;margin-top:10px}.composer input{flex:1}
+  .typing{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Google Workspace Assistant</h1>
+  <p class="lead">A <strong>Google ADK</strong> agent that decides which Workspace tools to call (calendar, Gmail, Drive) over the <strong>Model Context Protocol</strong>, then answers from what the tools return.</p>
+  <div class="sim"><strong>Simulated data.</strong> The real project connects to your own Google account through an OAuth-protected <code>workspace-mcp</code> server. This public demo uses the same agent code against a built-in mock MCP server with fictional sample mail, events and files. Nothing is read from or sent to a real account; each visitor gets their own private copy of the sample data.</div>
+
+  <section class="card">
+    <div id="chat" class="chat" aria-live="polite"></div>
+    <div class="chips" id="chips"></div>
+    <div class="composer">
+      <input id="text" maxlength="500" placeholder="Ask about the sample calendar, mail or files…" autocomplete="off">
+      <button id="send" type="button">Send</button>
+    </div>
+    <div id="err" class="err" role="alert"></div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="byo.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const SUGGESTIONS = [
+  "What's on my calendar this week?",
+  "Summarize my most recent emails",
+  "Find the Q3 roadmap doc and tell me the biggest risk",
+  "Schedule a 30 minute call with Sam tomorrow at 10:00 UTC",
+  "Draft a reply to Ravi about the demo day slides and send it"
+];
+let sessionId = null, busy = false;
+
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function addMsg(who, text){ const m = el("div", "msg " + who, text); $("chat").appendChild(m); $("chat").scrollTop = $("chat").scrollHeight; return m; }
+function addSteps(msg, steps){
+  if (!steps || !steps.length) return;
+  const d = el("details", "steps"); d.appendChild(el("summary", null, `Agent steps (${steps.length})`));
+  steps.forEach(s => {
+    const row = el("div", "step");
+    if (s.type === "tool_call") { row.appendChild(el("b", null, "Tool call: ")); row.appendChild(document.createTextNode(s.name + "(" + JSON.stringify(s.args) + ")")); }
+    else { row.appendChild(el("b", null, "Tool result: ")); row.appendChild(document.createTextNode(s.name + " → " + s.output)); }
+    d.appendChild(row);
+  });
+  msg.appendChild(d);
+}
+async function send(text){
+  text = (text || "").trim(); if (!text || busy) return;
+  busy = true; $("send").disabled = true; $("err").textContent = ""; $("text").value = "";
+  addMsg("you", text); const wait = addMsg("agent typing", "Thinking and calling tools… (can take up to ~30 s)");
+  try {
+    const r = await demoPost("/chat", {message: text, sessionId});
+    sessionId = r.sessionId; wait.remove();
+    const m = addMsg("agent", r.reply); addSteps(m, r.steps);
+  } catch (e) { wait.remove(); $("err").textContent = e.message; }
+  finally { busy = false; $("send").disabled = false; $("text").focus(); }
+}
+SUGGESTIONS.forEach(t => { const b = el("button", "secondary", t); b.type = "button"; b.addEventListener("click", () => send(t)); $("chips").appendChild(b); });
+$("send").addEventListener("click", () => send($("text").value));
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send($("text").value); } });
+addMsg("agent", "Hi! I can look through the sample calendar, mail and Drive files and take simulated actions. Try one of the suggestions below.");
+</script>
+</body>
+</html>

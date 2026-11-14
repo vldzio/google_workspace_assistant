@@ -70,3 +70,17 @@ A GET to `/mcp` is not a full functionality check: the MCP transport may require
 ## Security and status
 
 Keep `.env`, OAuth credentials, saved Docker credentials, and any Workspace data out of version control. This is a **local integration prototype**, not a hosted multi-user app; it has no application-level approval UI for write actions. Restrict OAuth scopes, confirm changes before granting broad access, and review the external `workspace-mcp` package before use. Never expose the unauthenticated MCP port publicly. There is no claim here that live Workspace operations were run during this code review.
+
+## Live web demo
+
+[`demo/`](demo) (static chat UI, Vercel) talks to [`demo_api/`](demo_api) (FastAPI, Hugging Face Space bundling a private [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) gateway):
+
+```text
+Browser -> POST /chat -> the SAME ADK agent (mcp_server/agent.py: build_agent) -> LiteLLM -> private gateway -> free-tier LLM
+                                                     \-> MCP (Streamable HTTP) -> bundled MOCK Workspace MCP server (sample data)
+```
+
+* **Real**: the ADK `LlmAgent` + `McpToolset`, live model reasoning and tool selection; the UI shows every tool call and result.
+* **Simulated**: a public demo cannot use someone's Google account, so `demo_api/mock_workspace_mcp.py` serves fictional calendar/Gmail/Drive data (per-visitor isolated, nothing is sent anywhere). Point `MCP_SERVER_URL` at the real `workspace-mcp` server to use your own account as described above.
+* `mcp_server/agent.py` gained `build_agent()` and a `LiteLlm` model path used when `LLM_BASE_URL` is set; with it unset the agent is unchanged (Gemini).
+* LLM calls are traced to LangSmith (`workspace-demo`); visitors get a daily allowance or can bring their own key. Deploy: [`deploy/space/`](deploy/space) and [`vercel.json`](vercel.json). Tests: `pip install -r demo_api/requirements.txt pytest && pytest tests/test_demo_api.py` (+ `python -m unittest` for the config tests).

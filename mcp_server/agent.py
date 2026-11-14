@@ -68,30 +68,54 @@ def _mcp_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+INSTRUCTION = (
+    "You are a Google Workspace assistant using MCP tools exposed by a "
+    "local workspace-mcp server. Help the user with Gmail, Calendar, "
+    "Drive, Docs, Sheets, Tasks, Contacts, and related Google Workspace "
+    "operations only when those tools are available. Use MCP tools to "
+    "inspect or modify user data instead of guessing. If a tool call "
+    "fails because authentication is missing or expired, tell the user "
+    "that the MCP server needs to be authenticated first. If a tool is "
+    "not available, say so clearly rather than inventing capabilities."
+)
+
+
+def _build_model(base_url: str = "", api_key: str = ""):
+    """Gemini by default. With LLM_BASE_URL (or an explicit base_url) the agent talks to any
+    OpenAI-compatible endpoint through LiteLLM, e.g. a FreeLLMAPI gateway."""
+    base_url = base_url or os.getenv("LLM_BASE_URL", "").strip()
+    if not base_url:
+        return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    from google.adk.models.lite_llm import LiteLlm
+
+    return LiteLlm(
+        model=f"openai/{os.getenv('LLM_MODEL_ID', 'auto')}",
+        api_base=base_url,
+        api_key=api_key or os.getenv("LLM_API_KEY", "not-needed"),
+    )
+
+
+def build_agent(model=None, mcp_url: str = "", extra_headers: dict[str, str] | None = None) -> LlmAgent:
+    """Build the workspace agent. ``root_agent`` below is ``build_agent()`` with env-based defaults;
+    the web demo builds one per request to inject a visitor-supplied model/key and session header."""
+    headers = {**_mcp_headers(), **(extra_headers or {})}
+    return LlmAgent(
+        name="workspace_mcp_agent",
+        model=model if model is not None else _build_model(),
+        instruction=INSTRUCTION,
+        tools=[
+            McpToolset(
+                connection_params=StreamableHTTPConnectionParams(
+                    url=mcp_url or MCP_SERVER_URL,
+                    headers=headers,
+                )
+            )
+        ],
+    )
+
+
 _load_env()
 MCP_SERVER_URL = _get_mcp_server_url()
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-
-root_agent = LlmAgent(
-    name="workspace_mcp_agent",
-    model=MODEL,
-    instruction=(
-        "You are a Google Workspace assistant using MCP tools exposed by a "
-        "local workspace-mcp server. Help the user with Gmail, Calendar, "
-        "Drive, Docs, Sheets, Tasks, Contacts, and related Google Workspace "
-        "operations only when those tools are available. Use MCP tools to "
-        "inspect or modify user data instead of guessing. If a tool call "
-        "fails because authentication is missing or expired, tell the user "
-        "that the MCP server needs to be authenticated first. If a tool is "
-        "not available, say so clearly rather than inventing capabilities."
-    ),
-    tools=[
-        McpToolset(
-            connection_params=StreamableHTTPConnectionParams(
-                url=MCP_SERVER_URL,
-                headers=_mcp_headers(),
-            )
-        )
-    ],
-)
+root_agent = build_agent()

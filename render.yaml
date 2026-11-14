@@ -1,0 +1,28 @@
+# Render Blueprint: same container as deploy/space (private FreeLLMAPI gateway + demo API).
+# Dashboard: New > Blueprint > pick this repo, branch demo-ready. Fill the sync:false secrets when prompted.
+services:
+  - type: web
+    name: workspace-demo-api
+    runtime: docker
+    plan: free
+    branch: demo-ready
+    dockerfilePath: ./deploy/space/Dockerfile
+    dockerContext: ./deploy/space
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: PORT            # start.sh serves the public API on 7860
+        value: "7860"
+      - key: ENCRYPTION_KEY  # 64 hex chars, required by the gateway
+        generateValue: false
+        sync: false
+      - key: FREEAPI_CONFIG_JSON
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: CORS_ORIGINS   # the Vercel frontend origin
+        sync: false
