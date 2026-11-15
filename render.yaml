@@ -20,6 +20,14 @@ services:
         sync: false
       - key: LANGSMITH_API_KEY
         sync: false
+      - key: LANGSMITH_ENDPOINT   # APAC region account
+        value: https://apac.api.smith.langchain.com
+      - key: LANGSMITH_BASE_URL   # read by LiteLLM's langsmith callback
+        value: https://apac.api.smith.langchain.com
+      - key: LANGSMITH_AGENT_ID
+        value: google-workspace-assistant
+      - key: LANGSMITH_AGENT_ENVIRONMENT
+        value: staging
       - key: UPSTASH_REDIS_REST_URL
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
