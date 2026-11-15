@@ -9,6 +9,7 @@ LLM calls are traced to LangSmith (guarded() trace + LiteLLM callback).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+log = logging.getLogger("demo_api")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -124,6 +126,16 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
                 steps.append({"type": "tool_result", "name": resp.name, "output": _short(out)})
             if event.is_final_response() and event.content and event.content.parts:
                 reply = "".join(p.text or "" for p in event.content.parts if getattr(p, "text", None)).strip()
+    except llm.LLMUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - upstream model/gateway failure, not a server bug
+        log.exception("agent run failed")
+        busy = "ratelimit" in type(exc).__name__.lower() or "rate" in str(exc).lower()[:200]
+        raise llm.LLMUnavailable(
+            "The free models are busy right now. Try again in a few minutes, or add your own API key."
+            if busy
+            else "The model call failed. Try again in a minute."
+        ) from exc
     finally:
         for tool in agent.tools:
             close = getattr(tool, "close", None)
