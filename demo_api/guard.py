@@ -82,6 +82,18 @@ def validate_byo(api_key: str | None, base_url: str | None) -> tuple[str, str] |
     return api_key.strip(), url
 
 
+def refund(ip: str, cost: int) -> None:
+    """Give credits back after a failure that was not the visitor's fault (gateway/model down). Best effort."""
+    if cost <= 0:
+        return
+    try:
+        ttl = _seconds_to_midnight_utc()
+        _incr(f"rl:{PROJECT}:ip:{_day()}:{ip}", -cost, ttl)
+        _incr(f"rl:{PROJECT}:global:{_day()}", -cost, ttl)
+    except Exception:  # noqa: BLE001 - a failed refund must never mask the real error
+        pass
+
+
 def check(ip: str, cost: int, byo: bool) -> Decision:
     if byo or cost <= 0:
         return Decision(True, byo=byo)

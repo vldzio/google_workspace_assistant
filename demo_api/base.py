@@ -87,6 +87,8 @@ async def guarded(req: Request, cost: int, fn: Callable[[], Any], *, name: str) 
         result = await anyio.to_thread.run_sync(lambda: ctx.run(run))
         return JSONResponse(result)
     except llm.LLMUnavailable as exc:
+        if not byo:
+            guard.refund(client_ip(req), cost)  # our outage, not the visitor's: don't burn their daily budget
         return JSONResponse({"error": str(exc)}, status_code=503)
     except ValueError as exc:  # bad input detected by handlers
         return JSONResponse({"error": str(exc)}, status_code=400)

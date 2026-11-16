@@ -135,6 +135,23 @@ def test_message_is_validated_and_limits_apply(client, monkeypatch):
     assert client.post("/chat", json={"message": "calendar?"}).status_code == 429
 
 
+def test_model_outage_returns_503_and_refunds_credits(client, monkeypatch):
+    from demo_api import app as app_module, llm
+
+    async def boom(session_id, message):
+        raise llm.LLMUnavailable("The free models are busy right now.")
+
+    monkeypatch.setattr(guard, "PER_IP_DAILY", 3)  # one successful turn costs 3 credits
+    with monkeypatch.context() as m:
+        m.setattr(app_module, "_chat", boom)
+        # without a refund the second call would already hit the 429 limit
+        for _ in range(3):
+            r = client.post("/chat", json={"message": "calendar?"})
+            assert r.status_code == 503
+            assert "busy" in r.json()["error"]
+    assert client.post("/chat", json={"message": "calendar?"}).status_code == 200
+
+
 def test_turn_cap_per_session(client):
     from demo_api import app as app_module
 
