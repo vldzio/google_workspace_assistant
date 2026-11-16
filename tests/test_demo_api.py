@@ -162,6 +162,17 @@ def test_byo_key_uses_a_real_model_of_that_provider_not_the_gateway_alias(client
     assert gateway.model == "openai/auto"
 
 
+def test_sample_data_is_exposed_and_remaining_credits_reported(client, monkeypatch):
+    data = client.get("/sample-data").json()
+    assert {"calendars", "events", "emails", "files"} <= set(data) and "outbox" not in data
+    assert any(e["summary"] == "Weekly planning" for e in data["events"])
+    monkeypatch.setattr(guard, "PER_IP_DAILY", 9)
+    r = client.post("/chat", json={"message": "calendar?"})
+    assert r.status_code == 200 and r.json()["freeRemaining"] == 6
+    limited = [client.post("/chat", json={"message": "calendar?"}) for _ in range(3)][-1]
+    assert limited.status_code == 429 and limited.json()["rateLimited"] is True
+
+
 def test_turn_cap_per_session(client):
     from demo_api import app as app_module
 

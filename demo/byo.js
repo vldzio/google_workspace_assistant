@@ -1,15 +1,15 @@
 /*
  * Shared demo-UI helper (copied into each project's demo UI).
  *  - window.demoPost(path, body)  -> POST JSON to the demo API, throws Error(message) on failure
- *  - "LLM key" panel: visitors may bring their own OpenAI-compatible key (kept in sessionStorage only,
- *    sent only to this demo's API, bypasses the shared daily limit)
+ *  - "LLM key" panel: shown once the visitor hits the shared daily limit; they may then bring their own
+ *    OpenAI-compatible key (kept in sessionStorage only, sent only to this demo's API)
  *  - banner explaining what is live
  * Config: window.DEMO_CONFIG = { API_URL, TITLE, SOURCE_URL, NOTE }
  */
 (function () {
   "use strict";
   const CFG = window.DEMO_CONFIG || {};
-  const KEY = "demo.byo.key", URLK = "demo.byo.baseUrl";
+  const KEY = "demo.byo.key", URLK = "demo.byo.baseUrl", LIMITED = "demo.byo.limited";
   const PROVIDERS = [
     ["https://api.openai.com/v1", "OpenAI"],
     ["https://api.groq.com/openai/v1", "Groq"],
@@ -34,7 +34,12 @@
     catch (e) { throw new Error("Could not reach the demo API. It may be waking up from sleep (about a minute) - please try again."); }
     const text = await resp.text();
     let data; try { data = JSON.parse(text); } catch (_) { data = { error: text.slice(0, 300) }; }
-    if (!resp.ok) throw new Error(data.error || ("Request failed (" + resp.status + ")"));
+    if (!resp.ok) {
+      const err = new Error(data.error || ("Request failed (" + resp.status + ")"));
+      err.rateLimited = !!data.rateLimited;
+      if (err.rateLimited) { store.set(LIMITED, "1"); window.dispatchEvent(new CustomEvent("demo:ratelimited")); }
+      throw err;
+    }
     return data;
   };
 
@@ -52,14 +57,16 @@
     const sum = document.createElement("summary"); sum.textContent = "LLM key"; det.appendChild(sum);
     const dot = document.createElement("span"); dot.className = "demo-dot"; sum.appendChild(dot);
     const panel = document.createElement("div"); panel.className = "demo-key-panel";
-    panel.innerHTML = '<p>Optional: use your own OpenAI-compatible key instead of the shared free tier. Stored in this tab only; never logged.</p>' +
+    panel.innerHTML = '<p>You have used today\'s free allowance. To keep going, add your own OpenAI-compatible key. Stored in this tab only; never logged.</p>' +
       '<select id="byo-provider">' + PROVIDERS.map(function (p) { return '<option value="' + p[0] + '">' + p[1] + "</option>"; }).join("") + "</select>" +
       '<input id="byo-key" type="password" autocomplete="off" placeholder="API key" />' +
       '<div><button id="byo-save">Save</button> <button id="byo-clear" class="secondary">Clear</button></div>';
     det.appendChild(panel); bar.appendChild(det);
     document.body.insertBefore(bar, document.body.firstChild);
     const keyEl = panel.querySelector("#byo-key"), provEl = panel.querySelector("#byo-provider");
-    const refresh = function () { dot.textContent = store.get(KEY) ? " ●" : ""; };
+    // The key option only appears once the free allowance is used up (or a key is already saved in this tab).
+    const refresh = function () { dot.textContent = store.get(KEY) ? " ●" : ""; det.hidden = !(store.get(KEY) || store.get(LIMITED)); };
+    window.addEventListener("demo:ratelimited", function () { refresh(); det.open = true; });
     provEl.value = store.get(URLK) || PROVIDERS[0][0]; refresh();
     panel.querySelector("#byo-save").addEventListener("click", function () { store.set(KEY, keyEl.value.trim()); store.set(URLK, provEl.value); keyEl.value = ""; refresh(); det.open = false; });
     panel.querySelector("#byo-clear").addEventListener("click", function () { store.set(KEY, ""); keyEl.value = ""; refresh(); });

@@ -85,6 +85,8 @@ async def guarded(req: Request, cost: int, fn: Callable[[], Any], *, name: str) 
     ctx = contextvars.copy_context()
     try:
         result = await anyio.to_thread.run_sync(lambda: ctx.run(run))
+        if isinstance(result, dict) and decision.remaining is not None:
+            result.setdefault("freeRemaining", decision.remaining)  # credits left today on the shared tier
         return JSONResponse(result)
     except llm.LLMUnavailable as exc:
         if not byo:

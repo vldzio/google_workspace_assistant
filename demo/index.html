@@ -17,6 +17,14 @@
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chips button{background:transparent;color:var(--accent);font-weight:500;font-size:14px}
   .composer{display:flex;gap:8px;margin-top:10px}.composer input{flex:1}
   .typing{color:var(--muted)}
+  .left{color:var(--muted);font-size:13px;margin-top:8px}
+  details.data>summary{cursor:pointer;font-weight:600}
+  details.data .hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+  .cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:12px}
+  .cols h2{margin:0 0 6px;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .cols ul{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto}
+  .cols li{padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13.5px;overflow-wrap:anywhere}
+  .cols li b{display:block}.cols li span{display:block;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -33,7 +41,18 @@
       <button id="send" type="button">Send</button>
     </div>
     <div id="err" class="err" role="alert"></div>
+    <div id="left" class="left"></div>
   </section>
+
+  <details class="card data" open>
+    <summary>Sample data the assistant can see</summary>
+    <p class="hint">This is the fictional starting data for your session. Anything the assistant "sends" or "schedules" only changes your own copy.</p>
+    <div class="cols">
+      <div><h2>Calendar</h2><ul id="d-events"><li class="muted">Loading…</li></ul></div>
+      <div><h2>Mail</h2><ul id="d-emails"></ul></div>
+      <div><h2>Drive files</h2><ul id="d-files"></ul></div>
+    </div>
+  </details>
 </main>
 <script src="config.js"></script>
 <script src="byo.js"></script>
@@ -69,13 +88,34 @@ async function send(text){
     const r = await demoPost("/chat", {message: text, sessionId});
     sessionId = r.sessionId; wait.remove();
     const m = addMsg("agent", r.reply); addSteps(m, r.steps);
-  } catch (e) { wait.remove(); $("err").textContent = e.message; }
+    if (typeof r.freeRemaining === "number") $("left").textContent = "Free messages left today: about " + Math.floor(r.freeRemaining / 3) + ".";
+  } catch (e) {
+    wait.remove(); $("err").textContent = e.message;
+    if (e.rateLimited) $("left").textContent = "Free allowance used up. Add your own key with the “LLM key” option at the top to keep going.";
+  }
   finally { busy = false; $("send").disabled = false; $("text").focus(); }
 }
 SUGGESTIONS.forEach(t => { const b = el("button", "secondary", t); b.type = "button"; b.addEventListener("click", () => send(t)); $("chips").appendChild(b); });
 $("send").addEventListener("click", () => send($("text").value));
 $("text").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send($("text").value); } });
-addMsg("agent", "Hi! I can look through the sample calendar, mail and Drive files and take simulated actions. Try one of the suggestions below.");
+const when = (iso) => new Date(iso).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC"}) + " UTC";
+const kind = (mime) => ({document: "Doc", presentation: "Slides", spreadsheet: "Sheet"})[(mime || "").split(".").pop()] || "File";
+function fill(id, rows, render){
+  const ul = $(id); ul.textContent = "";
+  rows.forEach(r => { const li = el("li"); const [title, ...lines] = render(r); li.appendChild(el("b", null, title)); lines.forEach(t => li.appendChild(el("span", null, t))); ul.appendChild(li); });
+}
+async function loadSampleData(){
+  try {
+    const base = ((window.DEMO_CONFIG || {}).API_URL || "").replace(/\/+$/, "");
+    if (!base) throw new Error("not configured");
+    const d = await (await fetch(base + "/sample-data")).json();
+    fill("d-events", d.events, e => [e.summary, when(e.start), e.location + (e.attendees.length ? " · " + e.attendees.join(", ") : "")]);
+    fill("d-emails", d.emails, m => [m.subject, m.from.replace(/\s*<.*>/, "") + " · " + when(m.date), m.body]);
+    fill("d-files", d.files, f => [f.name, kind(f.mime) + " · edited " + when(f.modified), f.content]);
+  } catch (_) { $("d-events").textContent = ""; $("d-events").appendChild(el("li", "muted", "Sample data could not be loaded (the demo API may be waking up). Reload in a minute.")); }
+}
+loadSampleData();
+addMsg("agent", "Hi! I can look through the sample calendar, mail and Drive files and take simulated actions. The sample data is listed under the chat. Try one of the suggestions below.");
 </script>
 </body>
 </html>

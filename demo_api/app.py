@@ -170,6 +170,16 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
     return {"reply": reply, "steps": steps}
 
 
+@app.get("/sample-data")
+def sample_data() -> dict[str, Any]:
+    """The fictional starting data every visitor session is seeded with, so the UI can show what can be asked."""
+    from .mock_workspace_mcp import seed
+
+    data = seed()
+    data.pop("outbox", None)
+    return data
+
+
 @app.post("/chat")
 async def chat(req: Request):
     try:
