@@ -80,7 +80,7 @@ INSTRUCTION = (
 )
 
 
-def _build_model(base_url: str = "", api_key: str = ""):
+def _build_model(base_url: str = "", api_key: str = "", model_id: str = ""):
     """Gemini by default. With LLM_BASE_URL (or an explicit base_url) the agent talks to any
     OpenAI-compatible endpoint through LiteLLM, e.g. a FreeLLMAPI gateway."""
     base_url = base_url or os.getenv("LLM_BASE_URL", "").strip()
@@ -89,7 +89,7 @@ def _build_model(base_url: str = "", api_key: str = ""):
     from google.adk.models.lite_llm import LiteLlm
 
     return LiteLlm(
-        model=f"openai/{os.getenv('LLM_MODEL_ID', 'auto')}",
+        model=f"openai/{model_id or os.getenv('LLM_MODEL_ID', 'auto')}",
         api_base=base_url,
         api_key=api_key or os.getenv("LLM_API_KEY", "not-needed"),
     )

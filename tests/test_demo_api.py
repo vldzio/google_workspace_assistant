@@ -152,6 +152,16 @@ def test_model_outage_returns_503_and_refunds_credits(client, monkeypatch):
     assert client.post("/chat", json={"message": "calendar?"}).status_code == 200
 
 
+def test_byo_key_uses_a_real_model_of_that_provider_not_the_gateway_alias(client):
+    from demo_api import app as app_module, llm
+
+    with llm.byo("gsk_test", "https://api.groq.com/openai/v1"):
+        m = app_module._model_for_request()
+    assert m.model == "openai/llama-3.3-70b-versatile"  # "auto" only exists on the FreeLLMAPI gateway
+    gateway = app_module._model_for_request()
+    assert gateway.model == "openai/auto"
+
+
 def test_turn_cap_per_session(client):
     from demo_api import app as app_module
 

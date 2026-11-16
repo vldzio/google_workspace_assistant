@@ -78,15 +78,32 @@ def _sessions():
     return _session_service
 
 
+# The gateway routes the virtual model "auto"; a visitor's own provider needs a real tool-calling model name.
+BYO_DEFAULT_MODELS = {
+    "api.openai.com": "gpt-4o-mini",
+    "api.groq.com": "llama-3.3-70b-versatile",
+    "openrouter.ai": "meta-llama/llama-3.3-70b-instruct:free",
+    "generativelanguage.googleapis.com": "gemini-2.5-flash",
+    "api.mistral.ai": "mistral-small-latest",
+    "api.cerebras.ai": "gpt-oss-120b",
+}
+
+
 def _model_for_request():
     """Gateway by default; a visitor-supplied key/base URL (validated in guarded()) via llm.byo()."""
+    from urllib.parse import urlparse
+
     from mcp_server.agent import _build_model
 
-    base = llm._byo_url.get() or os.environ.get("LLM_BASE_URL", "")
+    byo_url = llm._byo_url.get()
+    base = byo_url or os.environ.get("LLM_BASE_URL", "")
     key = llm._byo_key.get() or os.environ.get("LLM_API_KEY", "")
     if not base:
         raise llm.LLMUnavailable("The LLM gateway is not ready yet. Try again in a few seconds.")
-    return _build_model(base_url=base, api_key=key)
+    model_id = ""
+    if byo_url:  # own provider: pick a real model there (env BYO_MODEL_ID overrides for any host)
+        model_id = os.environ.get("BYO_MODEL_ID") or BYO_DEFAULT_MODELS.get(urlparse(byo_url).hostname or "", "")
+    return _build_model(base_url=base, api_key=key, model_id=model_id)
 
 
 def _short(value: Any, n: int = 700) -> str:
@@ -130,12 +147,16 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
         raise
     except Exception as exc:  # noqa: BLE001 - upstream model/gateway failure, not a server bug
         log.exception("agent run failed")
-        busy = "ratelimit" in type(exc).__name__.lower() or "rate" in str(exc).lower()[:200]
-        raise llm.LLMUnavailable(
-            "The free models are busy right now. Try again in a few minutes, or add your own API key."
-            if busy
-            else "The model call failed. Try again in a minute."
-        ) from exc
+        name = type(exc).__name__.lower()
+        if "authentication" in name or "permissiondenied" in name:
+            msg = "Your API key was rejected by the provider. Check the key and the provider you selected."
+        elif "notfound" in name:
+            msg = "The provider does not offer the model this demo picked. Try another provider, or ask the maintainer to set BYO_MODEL_ID."
+        elif "ratelimit" in name or "rate" in str(exc).lower()[:200]:
+            msg = "The free models are busy right now. Try again in a few minutes, or add your own API key."
+        else:
+            msg = "The model call failed. Try again in a minute."
+        raise llm.LLMUnavailable(msg) from exc
     finally:
         for tool in agent.tools:
             close = getattr(tool, "close", None)
