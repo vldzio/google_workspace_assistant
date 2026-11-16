@@ -218,3 +218,12 @@ def test_existing_agent_config_still_builds_gemini_by_default(monkeypatch):
     from mcp_server import agent
 
     assert agent._build_model() == "gemini-2.5-flash"
+
+
+def test_progress_endpoint_reports_live_steps(client):
+    from demo_api import app as app_module
+
+    assert client.get("/chat/progress", params={"sessionId": "nobody123456"}).json() == {"steps": []}
+    app_module._live["live123456789"] = [{"type": "tool_call", "name": "get_events", "args": {}}]
+    assert client.get("/chat/progress", params={"sessionId": "live123456789"}).json()["steps"][0]["name"] == "get_events"
+    app_module._live.clear()

@@ -14,6 +14,8 @@
   .steps{margin-top:8px;font-size:13px}.steps summary{cursor:pointer;color:var(--muted)}
   .step{padding:6px 8px;border-left:3px solid var(--border);margin:6px 0;background:var(--code);border-radius:0 6px 6px 0;overflow-wrap:anywhere}
   .step b{color:var(--accent)}
+  .steps,.steps .step{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+  .step.think{border-left-color:var(--muted);font-style:italic;color:var(--muted)}
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chips button{background:transparent;color:var(--accent);font-weight:500;font-size:14px}
   .composer{display:flex;gap:8px;margin-top:10px}.composer input{flex:1}
   .typing{color:var(--muted)}
@@ -124,29 +126,49 @@ function renderMarkdown(src){
   }
   return root;
 }
+function stepRow(s){
+  const row = el("div", s.type === "thinking" ? "step think" : "step");
+  if (s.type === "thinking") { row.appendChild(el("b", null, "Thinking: ")); row.appendChild(document.createTextNode(s.text)); }
+  else if (s.type === "tool_call") { row.appendChild(el("b", null, "Tool call: ")); row.appendChild(document.createTextNode(s.name + "(" + JSON.stringify(s.args) + ")")); }
+  else { row.appendChild(el("b", null, "Tool result: ")); row.appendChild(document.createTextNode(s.name + " → " + s.output)); }
+  return row;
+}
+function fillSteps(d, steps, working){
+  const sum = d.querySelector("summary");
+  sum.textContent = (working ? "Working… " : "Thinking & tool calls ") + "(" + steps.length + ")";
+  d.querySelectorAll(".step").forEach(n => n.remove());
+  steps.forEach(s => d.appendChild(stepRow(s)));
+}
 function addSteps(msg, steps){
   if (!steps || !steps.length) return;
-  const d = el("details", "steps"); d.appendChild(el("summary", null, `Agent steps (${steps.length})`));
-  steps.forEach(s => {
-    const row = el("div", "step");
-    if (s.type === "tool_call") { row.appendChild(el("b", null, "Tool call: ")); row.appendChild(document.createTextNode(s.name + "(" + JSON.stringify(s.args) + ")")); }
-    else { row.appendChild(el("b", null, "Tool result: ")); row.appendChild(document.createTextNode(s.name + " → " + s.output)); }
-    d.appendChild(row);
-  });
-  msg.appendChild(d);
+  const d = el("details", "steps"); d.appendChild(el("summary"));
+  fillSteps(d, steps, false); msg.appendChild(d);
 }
 async function send(text){
   text = (text || "").trim(); if (!text || busy) return;
   busy = true; $("send").disabled = true; $("err").textContent = ""; $("text").value = "";
-  addMsg("you", text); const wait = addMsg("agent typing", "Thinking and calling tools… (can take up to ~30 s)");
+  if (!sessionId) sessionId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).replace(/[^a-zA-Z0-9]/g, "");
+  addMsg("you", text); const wait = addMsg("agent typing", "Working… (can take up to ~30 s)");
+  const live = el("details", "steps"); live.open = true; live.appendChild(el("summary")); live.hidden = true; wait.appendChild(live);
+  let polling = true;
+  const poll = async () => {
+    while (polling) {
+      await new Promise(r => setTimeout(r, 900));
+      try {
+        const j = await (await fetch(apiBase() + "/chat/progress?sessionId=" + encodeURIComponent(sessionId))).json();
+        if (polling && j.steps && j.steps.length) { live.hidden = false; fillSteps(live, j.steps, true); $("chat").scrollTop = $("chat").scrollHeight; }
+      } catch (_) { /* progress is best effort */ }
+    }
+  };
+  poll();
   try {
     const r = await demoPost("/chat", {message: text, sessionId});
-    sessionId = r.sessionId; wait.remove();
+    polling = false; sessionId = r.sessionId; wait.remove();
     const m = addMsg("agent md", ""); m.appendChild(renderMarkdown(r.reply)); addSteps(m, r.steps);
     refreshData();
     if (typeof r.freeRemaining === "number") $("left").textContent = "Free messages left today: about " + Math.floor(r.freeRemaining / 3) + ".";
   } catch (e) {
-    wait.remove(); $("err").textContent = e.message;
+    polling = false; wait.remove(); $("err").textContent = e.message;
     if (e.rateLimited) $("left").textContent = "Free allowance used up. Add your own key with the “LLM key” option at the top to keep going.";
   }
   finally { busy = false; $("send").disabled = false; $("text").focus(); }

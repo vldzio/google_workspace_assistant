@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -42,6 +43,7 @@ MAX_LLM_CALLS = 8
 _mock_proc: subprocess.Popen | None = None
 _session_service = None
 _turns: dict[str, int] = {}
+_live: dict[str, list] = {}  # steps of the run in progress, polled by the UI
 
 
 def _start_mock() -> None:
@@ -131,6 +133,9 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=service)
 
     steps: list[dict[str, Any]] = []
+    if len(_live) > 500:
+        _live.clear()
+    _live[session_id] = steps
     reply = ""
     try:
         async for event in runner.run_async(
@@ -139,6 +144,12 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
             new_message=types.Content(role="user", parts=[types.Part(text=message)]),
             run_config=RunConfig(max_llm_calls=MAX_LLM_CALLS),
         ):
+            final = event.is_final_response()
+            for p in (event.content.parts if event.content and event.content.parts else []):
+                text = (getattr(p, "text", None) or "").strip()
+                # reasoning shown by reasoning models, or narration before a tool call
+                if text and (getattr(p, "thought", False) or not final):
+                    steps.append({"type": "thinking", "text": _short(text, 1500)})
             for call in event.get_function_calls() or []:
                 steps.append({"type": "tool_call", "name": call.name, "args": dict(call.args or {})})
             for resp in event.get_function_responses() or []:
@@ -147,7 +158,10 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
                     out = out["result"]
                 steps.append({"type": "tool_result", "name": resp.name, "output": _short(out)})
             if event.is_final_response() and event.content and event.content.parts:
-                reply = "".join(p.text or "" for p in event.content.parts if getattr(p, "text", None)).strip()
+                reply = "".join(p.text or "" for p in event.content.parts if getattr(p, "text", None) and not getattr(p, "thought", False)).strip()
+                for block in re.findall(r"<think>(.*?)</think>", reply, flags=re.S):
+                    if block.strip():
+                        steps.append({"type": "thinking", "text": _short(block.strip(), 1500)})
     except llm.LLMUnavailable:
         raise
     except Exception as exc:  # noqa: BLE001 - upstream model/gateway failure, not a server bug
@@ -163,6 +177,7 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
             msg = "The model call failed. Try again in a minute."
         raise llm.LLMUnavailable(msg) from exc
     finally:
+        _live.pop(session_id, None)
         for tool in agent.tools:
             close = getattr(tool, "close", None)
             if close:
@@ -201,6 +216,12 @@ async def session_data(sessionId: str = "") -> JSONResponse:
             return JSONResponse(r.json())
     except Exception:  # noqa: BLE001 - the panel is informational; never fail the page over it
         return JSONResponse(sample_data())
+
+
+@app.get("/chat/progress")
+def chat_progress(sessionId: str = "") -> dict[str, Any]:
+    """Thinking and tool calls of the run in progress, so the UI can show them live."""
+    return {"steps": list(_live.get(sessionId, []))}
 
 
 @app.post("/chat")
