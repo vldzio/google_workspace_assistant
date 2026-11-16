@@ -173,6 +173,21 @@ def test_sample_data_is_exposed_and_remaining_credits_reported(client, monkeypat
     assert limited.status_code == 429 and limited.json()["rateLimited"] is True
 
 
+def test_changes_made_by_the_agent_show_up_in_the_session_data_only(client):
+    _LLM.tool_name = "create_event"
+    _LLM.tool_args = {"summary": "Call with Sam", "start_time": "2030-01-01T10:00:00Z", "end_time": "2030-01-01T10:30:00Z"}
+    sid = "sessionabc123456789"
+    r = client.post("/chat", json={"message": "schedule a call with Sam", "sessionId": sid})
+    assert r.status_code == 200, r.text
+    mine = client.get("/session-data", params={"sessionId": sid}).json()
+    assert any(e["summary"] == "Call with Sam" for e in mine["events"])
+    other = client.get("/session-data", params={"sessionId": "someoneelse123456789"}).json()
+    assert not any(e["summary"] == "Call with Sam" for e in other["events"])  # isolated per visitor
+    base = client.get("/sample-data").json()
+    assert not any(e["summary"] == "Call with Sam" for e in base["events"])  # the main sample data is unchanged
+    assert client.get("/session-data", params={"sessionId": "../x"}).json()["events"]  # bad id -> plain seed
+
+
 def test_turn_cap_per_session(client):
     from demo_api import app as app_module
 

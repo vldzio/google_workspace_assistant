@@ -186,6 +186,23 @@ def sample_data() -> dict[str, Any]:
     return data
 
 
+@app.get("/session-data")
+async def session_data(sessionId: str = "") -> JSONResponse:
+    """Current state of this visitor's sample data, including anything the agent created or sent."""
+    import httpx
+
+    if not (sessionId.isalnum() and 8 <= len(sessionId) <= 64):
+        return JSONResponse(sample_data())
+    base = MOCK_URL.rsplit("/mcp", 1)[0]
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{base}/state/{sessionId}")
+            r.raise_for_status()
+            return JSONResponse(r.json())
+    except Exception:  # noqa: BLE001 - the panel is informational; never fail the page over it
+        return JSONResponse(sample_data())
+
+
 @app.post("/chat")
 async def chat(req: Request):
     try:

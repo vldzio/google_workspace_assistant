@@ -180,6 +180,18 @@ def get_drive_file_content(ctx: Context, file_id: str) -> str:
     return f"No file with id {file_id}."
 
 
+@mcp.custom_route("/state/{sid}", methods=["GET"])
+async def session_state(request):  # noqa: ANN001 - starlette Request
+    """Read-only view of one visitor session (the demo API proxies it so the UI can show live sample data).
+    Internal only: the server binds to 127.0.0.1. An unknown session returns the untouched seed, never creates one."""
+    from starlette.responses import JSONResponse
+
+    sid = request.path_params["sid"][:64]
+    with _lock:
+        st = copy.deepcopy(_sessions[sid]) if sid in _sessions else None
+    return JSONResponse(st if st is not None else seed())
+
+
 def snapshot_outbox(session_id: str) -> list[dict[str, Any]]:
     with _lock:
         return copy.deepcopy(_sessions.get(session_id, {}).get("outbox", []))

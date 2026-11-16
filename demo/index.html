@@ -31,6 +31,8 @@
   .cols h2{margin:0 0 6px;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
   .cols ul{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto}
   .cols li{padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13.5px;overflow-wrap:anywhere}
+  .cols li.new{border-color:var(--good);box-shadow:inset 3px 0 0 var(--good)}
+  .cols li .tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700;color:var(--good);border:1px solid var(--good)}
   .cols li b{display:block}.cols li span{display:block;color:var(--muted)}
 </style>
 </head>
@@ -53,11 +55,12 @@
 
   <details class="card data" open>
     <summary>Sample data the assistant can see</summary>
-    <p class="hint">This is the fictional starting data for your session. Anything the assistant "sends" or "schedules" only changes your own copy.</p>
+    <p class="hint">Fictional data for your session. When the assistant schedules an event or "sends" an email, it appears here marked <span class="tag" style="display:inline-block;margin:0;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700;color:var(--good);border:1px solid var(--good)">NEW</span>. Only your own copy changes, and the original sample data stays the same for everyone else.</p>
     <div class="cols">
       <div><h2>Calendar</h2><ul id="d-events"><li class="muted">Loading…</li></ul></div>
       <div><h2>Mail</h2><ul id="d-emails"></ul></div>
       <div><h2>Drive files</h2><ul id="d-files"></ul></div>
+      <div id="d-sent-col" hidden><h2>Sent (demo outbox)</h2><ul id="d-sent"></ul></div>
     </div>
   </details>
 </main>
@@ -140,6 +143,7 @@ async function send(text){
     const r = await demoPost("/chat", {message: text, sessionId});
     sessionId = r.sessionId; wait.remove();
     const m = addMsg("agent md", ""); m.appendChild(renderMarkdown(r.reply)); addSteps(m, r.steps);
+    refreshData();
     if (typeof r.freeRemaining === "number") $("left").textContent = "Free messages left today: about " + Math.floor(r.freeRemaining / 3) + ".";
   } catch (e) {
     wait.remove(); $("err").textContent = e.message;
@@ -152,19 +156,37 @@ $("send").addEventListener("click", () => send($("text").value));
 $("text").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send($("text").value); } });
 const when = (iso) => new Date(iso).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC"}) + " UTC";
 const kind = (mime) => ({document: "Doc", presentation: "Slides", spreadsheet: "Sheet"})[(mime || "").split(".").pop()] || "File";
-function fill(id, rows, render){
+let baseIds = null;
+const isNew = (r) => baseIds && r.id && !baseIds.has(r.id);
+function fill(id, rows, render, allNew){
   const ul = $(id); ul.textContent = "";
-  rows.forEach(r => { const li = el("li"); const [title, ...lines] = render(r); li.appendChild(el("b", null, title)); lines.forEach(t => li.appendChild(el("span", null, t))); ul.appendChild(li); });
+  rows.forEach(r => {
+    const fresh = allNew || isNew(r);
+    const li = el("li", fresh ? "new" : null); const [title, ...lines] = render(r);
+    const b = el("b", null, title); if (fresh) b.appendChild(el("span", "tag", "NEW"));
+    li.appendChild(b); lines.forEach(t => li.appendChild(el("span", null, t))); ul.appendChild(li);
+  });
 }
+function renderData(d){
+  fill("d-events", d.events, e => [e.summary, when(e.start) + (e.end ? " - " + when(e.end).split(", ").pop() : ""), (e.location || "") + (e.attendees.length ? (e.location ? " · " : "") + e.attendees.join(", ") : "")]);
+  fill("d-emails", d.emails, m => [m.subject, m.from.replace(/\s*<.*>/, "") + " · " + when(m.date), m.body]);
+  fill("d-files", d.files, f => [f.name, kind(f.mime) + " · edited " + when(f.modified), f.content]);
+  const sent = d.outbox || [];
+  $("d-sent-col").hidden = !sent.length;
+  fill("d-sent", sent, m => ["To: " + m.to, m.subject, m.body], true);
+}
+const apiBase = () => ((window.DEMO_CONFIG || {}).API_URL || "").replace(/\/+$/, "");
 async function loadSampleData(){
   try {
-    const base = ((window.DEMO_CONFIG || {}).API_URL || "").replace(/\/+$/, "");
-    if (!base) throw new Error("not configured");
-    const d = await (await fetch(base + "/sample-data")).json();
-    fill("d-events", d.events, e => [e.summary, when(e.start), e.location + (e.attendees.length ? " · " + e.attendees.join(", ") : "")]);
-    fill("d-emails", d.emails, m => [m.subject, m.from.replace(/\s*<.*>/, "") + " · " + when(m.date), m.body]);
-    fill("d-files", d.files, f => [f.name, kind(f.mime) + " · edited " + when(f.modified), f.content]);
+    if (!apiBase()) throw new Error("not configured");
+    const d = await (await fetch(apiBase() + "/sample-data")).json();
+    baseIds = new Set([...d.events, ...d.emails, ...d.files].map(x => x.id));
+    renderData(d);
   } catch (_) { $("d-events").textContent = ""; $("d-events").appendChild(el("li", "muted", "Sample data could not be loaded (the demo API may be waking up). Reload in a minute.")); }
+}
+async function refreshData(){  // show what the assistant changed in this session
+  if (!sessionId || !baseIds) return;
+  try { renderData(await (await fetch(apiBase() + "/session-data?sessionId=" + encodeURIComponent(sessionId))).json()); } catch (_) { /* informational */ }
 }
 loadSampleData();
 addMsg("agent", "Hi! I can look through the sample calendar, mail and Drive files and take simulated actions. The sample data is listed under the chat. Try one of the suggestions below.");
