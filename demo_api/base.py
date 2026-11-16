@@ -45,6 +45,27 @@ def create_app(title: str, *, on_startup: Callable[[], None] | None = None) -> F
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/tracing-check")
+    def tracing_check() -> dict[str, Any]:
+        """Diagnose LangSmith: is it on, which endpoint/project, does the key work. Never returns secrets."""
+        info: dict[str, Any] = {
+            "enabled": llm.tracing_enabled(),
+            "endpoint": os.environ.get("LANGSMITH_ENDPOINT") or "(default US)",
+            "project": os.environ.get("LANGSMITH_PROJECT"),
+            "conflictingAgentVars": [k for k in ("LANGSMITH_AGENT_ID", "LANGSMITH_AGENT_ENVIRONMENT") if os.environ.get(k)],
+        }
+        try:
+            from langsmith.run_trees import get_cached_client
+
+            c = get_cached_client()
+            info["apiUrl"] = c.api_url
+            projects = list(c.list_projects(limit=5))
+            info["auth"] = "ok"
+            info["projectExists"] = any(p.name == info["project"] for p in projects) or None
+        except Exception as exc:  # noqa: BLE001
+            info["auth"] = f"failed: {type(exc).__name__}: {str(exc)[:200]}"
+        return info
+
     return app
 
 
@@ -98,8 +119,8 @@ async def guarded(req: Request, cost: int, fn: Callable[[], Any], *, name: str) 
         # make sure short-lived traces reach LangSmith before the worker idles
         if llm.tracing_enabled():
             try:
-                from langsmith import Client
+                from langsmith.run_trees import get_cached_client
 
-                Client().flush()
+                get_cached_client().flush()  # the client traceable() queues into (a new Client() has its own, empty queue)
             except Exception:  # noqa: BLE001
                 pass
