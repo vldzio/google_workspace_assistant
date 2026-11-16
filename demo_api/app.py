@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 from . import guard, llm  # noqa: E402
 from .base import create_app, guarded  # noqa: E402
+from .reply import clean_reply  # noqa: E402
 
 MOCK_PORT = int(os.environ.get("MOCK_MCP_PORT", "8081"))
 MOCK_URL = os.environ.get("MOCK_MCP_URL", f"http://127.0.0.1:{MOCK_PORT}/mcp")
@@ -119,6 +121,9 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
     from mcp_server.agent import build_agent
 
     agent = build_agent(model=_model_for_request(), mcp_url=MOCK_URL, extra_headers={"X-Demo-Session": session_id})
+    # models do not know today's date; the sample events are relative to it, so tell the agent
+    now = datetime.now(timezone.utc)
+    agent.instruction = f"{agent.instruction} Today is {now:%A %Y-%m-%d}, the time is {now:%H:%M} UTC. Use UTC for all times."
     service = _sessions()
     user_id = session_id
     if await service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id) is None:
@@ -165,6 +170,7 @@ async def _chat(session_id: str, message: str) -> dict[str, Any]:
                     await close()
                 except Exception:  # noqa: BLE001
                     pass
+    reply = clean_reply(reply)
     if not reply:
         raise llm.LLMUnavailable("The model returned no answer. Try rephrasing or try again in a minute.")
     return {"reply": reply, "steps": steps}
