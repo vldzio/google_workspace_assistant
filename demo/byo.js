@@ -45,7 +45,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     const bar = document.createElement("div");
-    bar.className = "demo-bar";
+    bar.className = "demo-bar"; bar.setAttribute("role", "region"); bar.setAttribute("aria-label", "About this demo");
     const title = document.createElement("span");
     title.className = "demo-bar-text";
     title.textContent = (CFG.NOTE || "Live demo: AI output is generated on the fly through a free-tier LLM gateway.") + " Each visitor gets a small daily allowance.";
@@ -58,8 +58,8 @@
     const dot = document.createElement("span"); dot.className = "demo-dot"; sum.appendChild(dot);
     const panel = document.createElement("div"); panel.className = "demo-key-panel";
     panel.innerHTML = '<p>You have used today\'s free allowance. To keep going, add your own OpenAI-compatible key. Stored in this tab only; never logged.</p>' +
-      '<select id="byo-provider">' + PROVIDERS.map(function (p) { return '<option value="' + p[0] + '">' + p[1] + "</option>"; }).join("") + "</select>" +
-      '<input id="byo-key" type="password" autocomplete="off" placeholder="API key" />' +
+      '<label for="byo-provider" style="margin-top:0">Provider</label><select id="byo-provider">' + PROVIDERS.map(function (p) { return '<option value="' + p[0] + '">' + p[1] + "</option>"; }).join("") + "</select>" +
+      '<label for="byo-key">API key</label><input id="byo-key" type="password" autocomplete="off" placeholder="Paste your key" />' +
       '<div><button id="byo-save">Save</button> <button id="byo-clear" class="secondary">Clear</button></div>';
     det.appendChild(panel); bar.appendChild(det);
     document.body.insertBefore(bar, document.body.firstChild);
