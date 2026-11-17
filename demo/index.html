@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Workspace Assistant</title>
+<meta name="description" content="A Google ADK agent that uses MCP tools for calendar, mail and Drive, demonstrated on simulated sample data.">
+<link rel="stylesheet" href="base.css">
+<style>
+  .sim{border-left:4px solid var(--accent);padding:10px 14px;background:var(--code);border-radius:0 10px 10px 0;margin:0 0 16px;font-size:14px}
+  .chat{display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:62vh;overflow:auto;padding:4px}
+  .msg{max-width:92%;padding:10px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);white-space:pre-wrap;overflow-wrap:anywhere}
+  .msg.you{align-self:flex-end;background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+  .steps{margin-top:8px;font-size:13px}.steps summary{cursor:pointer;color:var(--muted)}
+  .step{padding:6px 8px;border-left:3px solid var(--border);margin:6px 0;background:var(--code);border-radius:0 6px 6px 0;overflow-wrap:anywhere}
+  .step b{color:var(--accent)}
+  .steps,.steps .step{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+  .step.think{border-left-color:var(--muted);font-style:italic;color:var(--muted)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chips button{background:transparent;color:var(--accent);font-weight:500;font-size:14px}
+  .composer{display:flex;gap:8px;margin-top:10px}.composer input{flex:1}
+  .typing{color:var(--muted)}
+  .msg.md{white-space:normal}
+  .md p{margin:0 0 8px}.md p:last-child,.md ul:last-child,.md ol:last-child{margin-bottom:0}
+  .md ul,.md ol{margin:0 0 8px;padding-left:22px}.md li{margin:2px 0}
+  .md .md-h{font-weight:700}
+  .md code{font-size:.92em}
+  .md-table{overflow-x:auto;margin:0 0 8px}.md table{border-collapse:collapse;font-size:14px}
+  .md th,.md td{border:1px solid var(--border);padding:4px 8px;text-align:left;vertical-align:top}.md th{background:var(--code)}
+  .left{color:var(--muted);font-size:13px;margin-top:8px}
+  details.data>summary{cursor:pointer;font-weight:600}
+  details.data .hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+  .cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:12px}
+  .cols h2{margin:0 0 6px;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .cols ul{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto}
+  .cols li{padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13.5px;overflow-wrap:anywhere}
+  .cols li.new{border-color:var(--good);box-shadow:inset 3px 0 0 var(--good)}
+  .cols li .tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700;color:var(--good);border:1px solid var(--good)}
+  .cols li b{display:block}.cols li span{display:block;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Google Workspace Assistant</h1>
+  <p class="lead">A <strong>Google ADK</strong> agent that decides which Workspace tools to call (calendar, Gmail, Drive) over the <strong>Model Context Protocol</strong>, then answers from what the tools return.</p>
+  <div class="sim"><strong>Simulated data.</strong> The real project connects to your own Google account through an OAuth-protected <code>workspace-mcp</code> server. This public demo uses the same agent code against a built-in mock MCP server with fictional sample mail, events and files. Nothing is read from or sent to a real account; each visitor gets their own private copy of the sample data.</div>
+
+  <section class="card">
+    <div id="chat" class="chat" aria-live="polite"></div>
+    <div class="chips" id="chips"></div>
+    <div class="composer">
+      <input id="text" maxlength="500" placeholder="Ask about the sample calendar, mail or files…" autocomplete="off">
+      <button id="send" type="button">Send</button>
+    </div>
+    <div id="err" class="err" role="alert"></div>
+    <div id="left" class="left"></div>
+  </section>
+
+  <details class="card data" open>
+    <summary>Sample data the assistant can see</summary>
+    <p class="hint">Fictional data for your session. When the assistant schedules an event or "sends" an email, it appears here marked <span class="tag" style="display:inline-block;margin:0;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700;color:var(--good);border:1px solid var(--good)">NEW</span>. Only your own copy changes, and the original sample data stays the same for everyone else.</p>
+    <div class="cols">
+      <div><h2>Calendar</h2><ul id="d-events"><li class="muted">Loading…</li></ul></div>
+      <div><h2>Mail</h2><ul id="d-emails"></ul></div>
+      <div><h2>Drive files</h2><ul id="d-files"></ul></div>
+      <div id="d-sent-col" hidden><h2>Sent (demo outbox)</h2><ul id="d-sent"></ul></div>
+    </div>
+  </details>
+</main>
+<script src="config.js"></script>
+<script src="byo.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const SUGGESTIONS = [
+  "What's on my calendar this week?",
+  "Summarize my most recent emails",
+  "Find the Q3 roadmap doc and tell me the biggest risk",
+  "Schedule a 30 minute call with Sam tomorrow at 10:00 UTC",
+  "Draft a reply to Ravi about the demo day slides and send it"
+];
+let sessionId = null, busy = false;
+
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function addMsg(who, text){ const m = el("div", "msg " + who, text); $("chat").appendChild(m); $("chat").scrollTop = $("chat").scrollHeight; return m; }
+// Minimal, safe Markdown renderer for model replies: builds DOM nodes with textContent only (never innerHTML),
+// so model output cannot inject HTML or scripts. Supports bold, italic, inline code, headings, lists, tables.
+function inline(parent, text){
+  const re = /\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\*([^*\s][^*]*)\*/g; let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m[1] !== undefined || m[2] !== undefined) parent.appendChild(el("strong", null, m[1] !== undefined ? m[1] : m[2]));
+    else if (m[3] !== undefined) parent.appendChild(el("code", null, m[3]));
+    else parent.appendChild(el("em", null, m[4]));
+    last = re.lastIndex;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+const LIST_RE = /^\s*([-*•]|\d+[.)])\s+/, TABLE_RE = /^\s*\|.*\|\s*$/, HEAD_RE = /^\s{0,3}#{1,6}\s+/;
+function renderMarkdown(src){
+  const root = el("div"), lines = String(src).replace(/\r/g, "").split("\n"); let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    if (HEAD_RE.test(line)) { const h = el("p", "md-h"); inline(h, line.replace(HEAD_RE, "")); root.appendChild(h); i++; continue; }
+    if (TABLE_RE.test(line)) {
+      const rows = []; while (i < lines.length && TABLE_RE.test(lines[i])) rows.push(lines[i++]);
+      const t = el("table"); let first = true;
+      rows.forEach(r => {
+        if (/^[\s|:\-]+$/.test(r)) return;
+        const tr = el("tr");
+        r.trim().replace(/^\||\|$/g, "").split("|").forEach(c => { const cell = el(first ? "th" : "td"); inline(cell, c.trim()); tr.appendChild(cell); });
+        t.appendChild(tr); first = false;
+      });
+      const wrap = el("div", "md-table"); wrap.appendChild(t); root.appendChild(wrap); continue;
+    }
+    if (LIST_RE.test(line)) {
+      const list = el(/^\s*\d/.test(line) ? "ol" : "ul");
+      while (i < lines.length && LIST_RE.test(lines[i])) { const li = el("li"); inline(li, lines[i].replace(LIST_RE, "")); list.appendChild(li); i++; }
+      root.appendChild(list); continue;
+    }
+    const p = el("p"); let k = 0;
+    while (i < lines.length && lines[i].trim() && !HEAD_RE.test(lines[i]) && !TABLE_RE.test(lines[i]) && !LIST_RE.test(lines[i])) {
+      if (k++) p.appendChild(el("br"));
+      inline(p, lines[i++]);
+    }
+    root.appendChild(p);
+  }
+  return root;
+}
+function stepRow(s){
+  const row = el("div", s.type === "thinking" ? "step think" : "step");
+  if (s.type === "thinking") { row.appendChild(el("b", null, "Thinking: ")); row.appendChild(document.createTextNode(s.text)); }
+  else if (s.type === "tool_call") { row.appendChild(el("b", null, "Tool call: ")); row.appendChild(document.createTextNode(s.name + "(" + JSON.stringify(s.args) + ")")); }
+  else { row.appendChild(el("b", null, "Tool result: ")); row.appendChild(document.createTextNode(s.name + " → " + s.output)); }
+  return row;
+}
+function fillSteps(d, steps, working){
+  const sum = d.querySelector("summary");
+  sum.textContent = (working ? "Working… " : "Thinking & tool calls ") + "(" + steps.length + ")";
+  d.querySelectorAll(".step").forEach(n => n.remove());
+  steps.forEach(s => d.appendChild(stepRow(s)));
+}
+function addSteps(msg, steps){
+  if (!steps || !steps.length) return;
+  const d = el("details", "steps"); d.appendChild(el("summary"));
+  fillSteps(d, steps, false); msg.appendChild(d);
+}
+async function send(text){
+  text = (text || "").trim(); if (!text || busy) return;
+  busy = true; $("send").disabled = true; $("err").textContent = ""; $("text").value = "";
+  if (!sessionId) sessionId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).replace(/[^a-zA-Z0-9]/g, "");
+  addMsg("you", text); const wait = addMsg("agent typing", "Working… (can take up to ~30 s)");
+  const live = el("details", "steps"); live.open = true; live.appendChild(el("summary")); live.hidden = true; wait.appendChild(live);
+  let polling = true;
+  const poll = async () => {
+    while (polling) {
+      await new Promise(r => setTimeout(r, 900));
+      try {
+        const j = await (await fetch(apiBase() + "/chat/progress?sessionId=" + encodeURIComponent(sessionId))).json();
+        if (polling && j.steps && j.steps.length) { live.hidden = false; fillSteps(live, j.steps, true); $("chat").scrollTop = $("chat").scrollHeight; }
+      } catch (_) { /* progress is best effort */ }
+    }
+  };
+  poll();
+  try {
+    const r = await demoPost("/chat", {message: text, sessionId});
+    polling = false; sessionId = r.sessionId; wait.remove();
+    const m = addMsg("agent md", ""); m.appendChild(renderMarkdown(r.reply)); addSteps(m, r.steps);
+    refreshData();
+    if (typeof r.freeRemaining === "number") $("left").textContent = "Free messages left today: about " + Math.floor(r.freeRemaining / 3) + ".";
+  } catch (e) {
+    polling = false; wait.remove(); $("err").textContent = e.message;
+    if (e.rateLimited) $("left").textContent = "Free allowance used up. Add your own key with the “LLM key” option at the top to keep going.";
+  }
+  finally { busy = false; $("send").disabled = false; $("text").focus(); }
+}
+SUGGESTIONS.forEach(t => { const b = el("button", "secondary", t); b.type = "button"; b.addEventListener("click", () => send(t)); $("chips").appendChild(b); });
+$("send").addEventListener("click", () => send($("text").value));
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send($("text").value); } });
+const when = (iso) => new Date(iso).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC"}) + " UTC";
+const kind = (mime) => ({document: "Doc", presentation: "Slides", spreadsheet: "Sheet"})[(mime || "").split(".").pop()] || "File";
+let baseIds = null;
+const isNew = (r) => baseIds && r.id && !baseIds.has(r.id);
+function fill(id, rows, render, allNew){
+  const ul = $(id); ul.textContent = "";
+  rows.forEach(r => {
+    const fresh = allNew || isNew(r);
+    const li = el("li", fresh ? "new" : null); const [title, ...lines] = render(r);
+    const b = el("b", null, title); if (fresh) b.appendChild(el("span", "tag", "NEW"));
+    li.appendChild(b); lines.forEach(t => li.appendChild(el("span", null, t))); ul.appendChild(li);
+  });
+}
+function renderData(d){
+  fill("d-events", d.events, e => [e.summary, when(e.start) + (e.end ? " - " + when(e.end).split(", ").pop() : ""), (e.location || "") + (e.attendees.length ? (e.location ? " · " : "") + e.attendees.join(", ") : "")]);
+  fill("d-emails", d.emails, m => [m.subject, m.from.replace(/\s*<.*>/, "") + " · " + when(m.date), m.body]);
+  fill("d-files", d.files, f => [f.name, kind(f.mime) + " · edited " + when(f.modified), f.content]);
+  const sent = d.outbox || [];
+  $("d-sent-col").hidden = !sent.length;
+  fill("d-sent", sent, m => ["To: " + m.to, m.subject, m.body], true);
+}
+const apiBase = () => ((window.DEMO_CONFIG || {}).API_URL || "").replace(/\/+$/, "");
+async function loadSampleData(){
+  try {
+    if (!apiBase()) throw new Error("not configured");
+    const d = await (await fetch(apiBase() + "/sample-data")).json();
+    baseIds = new Set([...d.events, ...d.emails, ...d.files].map(x => x.id));
+    renderData(d);
+  } catch (_) { $("d-events").textContent = ""; $("d-events").appendChild(el("li", "muted", "Sample data could not be loaded (the demo API may be waking up). Reload in a minute.")); }
+}
+async function refreshData(){  // show what the assistant changed in this session
+  if (!sessionId || !baseIds) return;
+  try { renderData(await (await fetch(apiBase() + "/session-data?sessionId=" + encodeURIComponent(sessionId))).json()); } catch (_) { /* informational */ }
+}
+loadSampleData();
+addMsg("agent", "Hi! I can look through the sample calendar, mail and Drive files and take simulated actions. The sample data is listed under the chat. Try one of the suggestions below.");
+</script>
+</body>
+</html>
