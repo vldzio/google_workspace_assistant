@@ -23,6 +23,6 @@ Source: <https://github.com/vldzio/google_workspace_assistant>.
 | `FREEAPI_CONFIG_JSON` | gateway config with your free-tier provider keys, see `freellmapi.config.example.json` |
 | `LANGSMITH_API_KEY` | LangSmith key (tracing switches on automatically) |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | per-IP and global daily limits |
-| `CORS_ORIGINS` | the frontend origin, e.g. `https://workspace-demo.vercel.app` |
+| `CORS_ORIGINS` | the frontend origin, e.g. `https://googleworkspaceassistant.vercel.app` |
 | `RL_PER_IP_DAILY` / `RL_GLOBAL_DAILY` | optional, default 20 / 1000 credits per UTC day |
 
