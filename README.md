@@ -1,28 +1,31 @@
 # Google Workspace Assistant — Google ADK × MCP
 
-A compact tool-using assistant that connects a Google ADK agent to a local **Google Workspace MCP server** over Streamable HTTP. The agent can ask the MCP server for available Workspace tools and use them for user-authorized Gmail, Calendar, Drive, Docs, Sheets, and related tasks, depending on the server's enabled tools and OAuth scopes.
+A tool-using assistant that connects a **Google ADK agent** to a **Google Workspace MCP server** over Streamable HTTP. The agent discovers the Workspace tools the server exposes and uses them for Gmail, Calendar, Drive, Docs, Sheets, and related tasks on your authorized account.
 
-This repository owns the **ADK agent, configuration, small Docker wrapper, and configuration tests**. The underlying `workspace-mcp` implementation is an external dependency installed by the Dockerfile; this project does not implement Google Workspace integrations from scratch.
+**Live demo:** [googleworkspaceassistant.vercel.app](https://googleworkspaceassistant.vercel.app) (runs on sample data and shows every tool call)
+
+This repository contains the ADK agent, its configuration, a Docker wrapper for the [`workspace-mcp`](https://pypi.org/project/workspace-mcp/) server, and configuration tests.
 
 ```text
 Browser → ADK Web → mcp_server/agent.py (Gemini LlmAgent)
                             ↓ Streamable HTTP
                 Dockerized workspace-mcp :8080/mcp
                             ↓ OAuth and Google APIs
-                       User's Workspace account
+                       Your Workspace account
 ```
 
 ## Highlights
 
-- `mcp_server/agent.py` defines an `LlmAgent` with a `McpToolset`, an environment-selectable Gemini model (default `gemini-2.5-flash`), and an explicit instruction not to invent unavailable tools or data.
-- The MCP endpoint may be set directly with `MCP_SERVER_URL`, or assembled from `WORKSPACE_MCP_BASE_URI` and the configured public port. An optional `MCP_AUTH_TOKEN` is sent as a bearer header when set.
-- `tests/test_agent_config.py` checks environment-file selection and endpoint configuration. These are **configuration unit tests**, not live Google API or end-to-end OAuth tests.
+- `mcp_server/agent.py` defines an `LlmAgent` with a `McpToolset` and an environment-selectable Gemini model (default `gemini-2.5-flash`). The agent is instructed to use only the tools and data it actually has.
+- The MCP endpoint is set with `MCP_SERVER_URL`, or built from `WORKSPACE_MCP_BASE_URI` and the public port. An optional `MCP_AUTH_TOKEN` is sent as a bearer header.
+- `TOOLS` restricts which Workspace services, and therefore which OAuth scopes, the server requests.
+- `tests/test_agent_config.py` covers environment-file selection and endpoint configuration.
 
-## Run locally
+## Setup
 
-You need Python, Docker, a Gemini API key for ADK, and a Google Cloud OAuth client with the APIs/scopes you plan to use. Configure the OAuth consent screen; add your account as a test user if the app is in testing mode. Add **exactly** `http://localhost:8080/oauth2callback` as an allowed redirect URI for this example.
+You need Python, Docker, a Gemini API key, and a Google Cloud OAuth client for the APIs you plan to use. On the OAuth consent screen, add your account as a test user, and add `http://localhost:8080/oauth2callback` as an authorized redirect URI.
 
-From the **repository root** (the directory containing `mcp_server/`):
+From the repository root:
 
 ```bash
 python -m venv .venv
@@ -31,9 +34,18 @@ pip install -r requirements.txt
 cp .env.example .env                  # Windows PowerShell: Copy-Item .env.example .env
 ```
 
-Edit `.env`: fill in `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_API_KEY` (for ADK/Gemini), and an appropriate `USER_GOOGLE_EMAIL`. Keep `MCP_SERVER_URL=http://localhost:8080/mcp` and `GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8080/oauth2callback` for the Docker command below. The example starts with `TOOLS=calendar` to limit requested OAuth scopes; enable more tools only as needed. `GOOGLE_API_KEY` is read by the Google ADK runtime, not directly by `agent.py`. Project/service-account fields in `.env.example` are context from an earlier cloud setup and are not read directly by the local agent.
+Fill in `.env` (it is git-ignored):
 
-Build and start the external MCP server in one terminal:
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`: your OAuth client
+- `GOOGLE_API_KEY`: Gemini key used by ADK
+- `USER_GOOGLE_EMAIL`: the account to act on
+- `MCP_SERVER_URL=http://localhost:8080/mcp`
+- `GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8080/oauth2callback`
+- `TOOLS=calendar` to start with Calendar only; add more services as needed
+
+## Run
+
+Start the MCP server:
 
 ```bash
 docker build -t local-workspace-mcp .
@@ -42,31 +54,28 @@ docker run --rm --name local-workspace-mcp --env-file .env \
   local-workspace-mcp
 ```
 
-Then, in another terminal from the **same repository root** with the virtual environment activated:
+In a second terminal, from the repository root with the virtual environment active:
 
 ```bash
 adk web --no-reload
 ```
 
-Open the local URL printed by ADK Web, select the `mcp_server` app, follow the Google OAuth flow if prompted, and try a small read-only request such as “What events are on my calendar today?” The `mcp_server/` folder is the ADK agent package; do **not** run `cd ..` from the repository root. OAuth behavior and tool availability are controlled by the external MCP server and your Google Cloud configuration.
+Open the URL ADK Web prints, select the `mcp_server` app, complete the Google sign-in when prompted, and try a request such as “What events are on my calendar today?”
 
-### Configuration and checks
+## Configuration
 
 | Setting | Purpose |
 | --- | --- |
-| `MCP_SERVER_URL` | Explicit Streamable HTTP endpoint; takes precedence over derived settings |
-| `WORKSPACE_MCP_BASE_URI`, `WORKSPACE_MCP_PUBLIC_PORT` | Fallback endpoint construction when `MCP_SERVER_URL` is unset |
-| `MCP_AUTH_TOKEN` | Optional bearer token header for the ADK-to-MCP connection |
+| `MCP_SERVER_URL` | Streamable HTTP endpoint; takes precedence over derived settings |
+| `WORKSPACE_MCP_BASE_URI`, `WORKSPACE_MCP_PUBLIC_PORT` | Used to build the endpoint when `MCP_SERVER_URL` is unset |
+| `MCP_AUTH_TOKEN` | Optional bearer token for the ADK-to-MCP connection |
 | `GEMINI_MODEL` | ADK model name; defaults to `gemini-2.5-flash` |
-| `TOOLS` | Optional restriction on MCP tools / OAuth scopes, consumed by `workspace-mcp` |
+| `TOOLS` | Workspace services (and OAuth scopes) enabled on the MCP server |
+
+## Tests and troubleshooting
 
 ```bash
 python -m unittest discover -s tests -v
-# If the agent cannot connect, check: docker ps; docker logs local-workspace-mcp
 ```
 
-A GET to `/mcp` is not a full functionality check: the MCP transport may require POST/session negotiation. Confirm connectivity and OAuth through an actual agent tool call.
-
-## Security and status
-
-Keep `.env`, OAuth credentials, saved Docker credentials, and any Workspace data out of version control. This is a **local integration prototype**, not a hosted multi-user app; it has no application-level approval UI for write actions. Restrict OAuth scopes, confirm changes before granting broad access, and review the external `workspace-mcp` package before use. Never expose the unauthenticated MCP port publicly.
+If the agent can't reach the server, check `docker ps` and `docker logs local-workspace-mcp`.
