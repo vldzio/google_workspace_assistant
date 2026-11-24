@@ -69,4 +69,4 @@ A GET to `/mcp` is not a full functionality check: the MCP transport may require
 
 ## Security and status
 
-Keep `.env`, OAuth credentials, saved Docker credentials, and any Workspace data out of version control. This is a **local integration prototype**, not a hosted multi-user app; it has no application-level approval UI for write actions. Restrict OAuth scopes, confirm changes before granting broad access, and review the external `workspace-mcp` package before use. Never expose the unauthenticated MCP port publicly. There is no claim here that live Workspace operations were run during this code review.
+Keep `.env`, OAuth credentials, saved Docker credentials, and any Workspace data out of version control. This is a **local integration prototype**, not a hosted multi-user app; it has no application-level approval UI for write actions. Restrict OAuth scopes, confirm changes before granting broad access, and review the external `workspace-mcp` package before use. Never expose the unauthenticated MCP port publicly.
