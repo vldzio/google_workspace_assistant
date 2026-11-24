@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+httpx>=0.27,<1
+openai>=1.50,<3
+langsmith>=0.2,<1
+jsonschema>=4.23,<5
+google-adk>=1.0
+litellm>=1.50
+mcp>=2,<3

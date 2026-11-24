@@ -2,7 +2,7 @@
 
 A tool-using assistant that connects a **Google ADK agent** to a **Google Workspace MCP server** over Streamable HTTP. The agent discovers the Workspace tools the server exposes and uses them for Gmail, Calendar, Drive, Docs, Sheets, and related tasks on your authorized account.
 
-**Live demo:** [googleworkspaceassistant.vercel.app](https://googleworkspaceassistant.vercel.app) (runs on sample data and shows every tool call)
+**Live demo:** [googleworkspaceassistant.vercel.app](https://googleworkspaceassistant.vercel.app). It runs the same agent on fictional sample data and shows every tool call.
 
 This repository contains the ADK agent, its configuration, a Docker wrapper for the [`workspace-mcp`](https://pypi.org/project/workspace-mcp/) server, and configuration tests.
 
@@ -16,10 +16,10 @@ Browser → ADK Web → mcp_server/agent.py (Gemini LlmAgent)
 
 ## Highlights
 
-- `mcp_server/agent.py` defines an `LlmAgent` with a `McpToolset` and an environment-selectable Gemini model (default `gemini-2.5-flash`). The agent is instructed to use only the tools and data it actually has.
+- `mcp_server/agent.py` builds an `LlmAgent` with a `McpToolset` (`build_agent()`). It uses Gemini by default (`gemini-2.5-flash`), or any OpenAI-compatible model through LiteLLM when `LLM_BASE_URL` is set. The agent is instructed to use only the tools and data it actually has.
 - The MCP endpoint is set with `MCP_SERVER_URL`, or built from `WORKSPACE_MCP_BASE_URI` and the public port. An optional `MCP_AUTH_TOKEN` is sent as a bearer header.
 - `TOOLS` restricts which Workspace services, and therefore which OAuth scopes, the server requests.
-- `tests/test_agent_config.py` covers environment-file selection and endpoint configuration.
+- `tests/` covers environment and endpoint configuration and the demo API end to end (only the LLM endpoint is stubbed).
 
 ## Setup
 
@@ -62,6 +62,28 @@ adk web --no-reload
 
 Open the URL ADK Web prints, select the `mcp_server` app, complete the Google sign-in when prompted, and try a request such as “What events are on my calendar today?”
 
+## Live demo
+
+```text
+Browser (Vercel, demo/) ──► POST /chat ──► demo_api/ (FastAPI)
+                                              ├─ the same ADK agent (build_agent) ──► LiteLLM ──► free-tier LLM gateway
+                                              └─ MCP over Streamable HTTP ──► bundled mock Workspace MCP server
+```
+
+- The agent, tool selection and model reasoning are the real thing; the page shows every tool call and its result.
+- `demo_api/mock_workspace_mcp.py` serves fictional calendar, Gmail and Drive data, isolated per visitor, so nobody has to connect a Google account. Sending mail or creating events only changes that visitor's in-memory copy.
+- Visitors get a daily allowance or can bring their own key; model calls are traced in LangSmith.
+
+Run it locally:
+
+```bash
+pip install -r demo_api/requirements.txt pytest
+pytest tests
+uvicorn demo_api.app:app --port 8180
+```
+
+Set `API_URL` in `demo/config.js` to `http://localhost:8180` and serve `demo/` with `python -m http.server`. Deployment recipes: `deploy/space/` and `vercel.json`.
+
 ## Configuration
 
 | Setting | Purpose |
@@ -70,12 +92,14 @@ Open the URL ADK Web prints, select the `mcp_server` app, complete the Google si
 | `WORKSPACE_MCP_BASE_URI`, `WORKSPACE_MCP_PUBLIC_PORT` | Used to build the endpoint when `MCP_SERVER_URL` is unset |
 | `MCP_AUTH_TOKEN` | Optional bearer token for the ADK-to-MCP connection |
 | `GEMINI_MODEL` | ADK model name; defaults to `gemini-2.5-flash` |
+| `LLM_BASE_URL`, `LLM_API_KEY` | Use an OpenAI-compatible model through LiteLLM instead of Gemini |
 | `TOOLS` | Workspace services (and OAuth scopes) enabled on the MCP server |
 
 ## Tests and troubleshooting
 
 ```bash
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v    # agent configuration tests
+pytest tests                                # all tests, including the demo API
 ```
 
 If the agent can't reach the server, check `docker ps` and `docker logs local-workspace-mcp`.
